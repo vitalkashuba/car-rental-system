@@ -1,0 +1,38 @@
+<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Адмін-панель</title><link rel="stylesheet" href="/static/style.css"></head><body>
+<header><h1>🛠 Адмін-панель прокату</h1><label style="font-size:13px">Ключ: <input id="key" type="password" value="admin123" size="10"></label><a href="/">← Клієнтська частина</a></header>
+<nav><button class="on" data-t="cars">Автопарк</button><button data-t="deals">Угоди та повернення</button><button data-t="clients">Клієнти</button><button data-t="rep">Звіти</button></nav>
+<main><div id="msg"></div>
+<section id="cars"><h2>Додати автомобіль</h2><div class="row">
+ <label>Марка<input id="nb"></label><label>Модель<input id="nm"></label><label>Клас<select id="nt"><option value="economy">Економ</option><option value="suv">Позашляховик</option><option value="minivan">Мінівен</option><option value="premium">Преміум</option></select></label>
+ <label>Рік<input id="ny" type="number" value="2022" style="width:90px"></label><label>Базова ціна/доба<input id="np" type="number" value="700" style="width:110px"></label>
+ <button class="btn" onclick="addCar()">Додати</button></div><div id="ctable"></div></section>
+<section id="deals" class="hide"><h2>Угоди</h2><div id="dtable"></div></section>
+<section id="clients" class="hide"><h2>Клієнти</h2><div id="cltable"></div></section>
+<section id="rep" class="hide"><h2>Звіти</h2><div id="r1"></div><div id="r2"></div></section></main>
+<script>
+const $=s=>document.querySelector(s);const H=()=>({'Content-Type':'application/json','X-Admin-Key':$('#key').value});
+async function api(u,m='GET',b){const r=await fetch(u,{method:m,headers:H(),body:b?JSON.stringify(b):undefined});const j=r.status==204?null:await r.json();if(!r.ok)throw new Error(j.detail||'Помилка');return j}
+const flash=(t,ok)=>{$('#msg').innerHTML=`<div class="msg ${ok?'okm':'err'}">${t}</div>`;setTimeout(()=>$('#msg').innerHTML='',4000)};
+const wrap=async f=>{try{await f()}catch(e){flash(e.message)}};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+ ['cars','deals','clients','rep'].forEach(i=>$('#'+i).classList.toggle('hide',i!==b.dataset.t));load(b.dataset.t)});
+function load(t){wrap(async()=>{if(t=='cars')await cars();if(t=='deals')await deals();if(t=='clients')await clients();if(t=='rep')await reps()})}
+async function cars(){const vs=await api('/api/vehicles');$('#ctable').innerHTML='<table><tr><th>#</th><th>Авто</th><th>Клас</th><th>Рік</th><th>Ціна/доба</th><th>Застава</th><th>Статус</th><th></th></tr>'+
+ vs.map(v=>`<tr><td>${v.id}</td><td>${v.brand} ${v.model}</td><td>${v.vtype}</td><td>${v.year}</td><td>${v.price_per_day}</td><td>${v.deposit}</td>
+ <td><select onchange="setSt(${v.id},this.value)">${['available','rented','maintenance'].map(s=>`<option ${s==v.status?'selected':''}>${s}</option>`).join('')}</select></td>
+ <td><button class="btn bad" onclick="del(${v.id})">Видалити</button></td></tr>`).join('')+'</table>'}
+const addCar=()=>wrap(async()=>{await api('/api/vehicles','POST',{brand:$('#nb').value,model:$('#nm').value,vtype:$('#nt').value,year:+$('#ny').value,base_price:+$('#np').value});flash('Авто додано (створено Factory Method)',1);cars()});
+const setSt=(id,s)=>wrap(async()=>{await api('/api/vehicles/'+id,'PATCH',{status:s});flash('Статус оновлено',1)});
+const del=id=>wrap(async()=>{await api('/api/vehicles/'+id,'DELETE');flash('Видалено',1);cars()});
+async function deals(){const rs=await api('/api/rentals');$('#dtable').innerHTML='<table><tr><th>№</th><th>Клієнт</th><th>Авто</th><th>Видача</th><th>Очікується</th><th>Ціна</th><th>Застава</th><th>Штраф</th><th>Дія</th></tr>'+
+ rs.map(r=>`<tr><td>${r.id}</td><td>${r.client}</td><td>${r.car}</td><td>${r.issue_date}</td><td>${r.expected_return}</td><td>${r.rent_price}</td><td>${r.deposit}</td><td>${r.fine||0}${r.fine_reason?`<div class="mut">${r.fine_reason}</div>`:''}</td>
+ <td>${r.status=='active'?`<select id="c${r.id}"><option value="ok">Без пошкоджень</option><option value="dirty">Брудне авто</option><option value="minor">Незначні пошк.</option><option value="major">Серйозні пошк.</option></select>
+ <input type="date" id="a${r.id}" value="${new Date().toISOString().slice(0,10)}"><button class="btn" onclick="ret(${r.id})">Прийняти</button>`:`<span class="badge closed">Закрита, повернено ${r.deposit_returned} грн застави</span>`}</td></tr>`).join('')+'</table>'}
+const ret=id=>wrap(async()=>{const r=await api(`/api/rentals/${id}/return`,'POST',{condition:$('#c'+id).value,actual_return:$('#a'+id).value});flash(`Прийнято. Штраф ${r.fine} грн, повернено застави ${r.deposit_returned} грн`,1);deals()});
+async function clients(){const cs=await api('/api/clients');$('#cltable').innerHTML='<table><tr><th>#</th><th>ПІБ</th><th>Адреса</th><th>Телефон</th><th>Угод</th></tr>'+cs.map(c=>`<tr><td>${c.id}</td><td>${c.full_name}</td><td>${c.address}</td><td>${c.phone}</td><td>${c.rentals}</td></tr>`).join('')+'</table>'}
+async function reps(){for(const [n,el] of [['occupancy','#r1'],['finance','#r2']]){const r=await api('/api/reports/'+n);
+ $(el).innerHTML=`<h3>${r.title}</h3><div class="stats">${Object.entries(r.summary).map(([k,v])=>`<div class="stat">${k}<b>${v}</b></div>`).join('')}</div>
+ <table><tr>${r.columns.map(c=>`<th>${c[1]}</th>`).join('')}</tr>${r.rows.map(x=>`<tr>${r.columns.map(c=>`<td>${x[c[0]]}</td>`).join('')}</tr>`).join('')}</table><br>`}}
+cars();
+</script></body></html>

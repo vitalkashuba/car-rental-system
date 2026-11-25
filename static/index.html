@@ -1,0 +1,47 @@
+<!doctype html><html lang="uk"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Прокат авто</title><link rel="stylesheet" href="/static/style.css"></head><body>
+<header><h1> Прокат автомобілів</h1><a href="/admin">Адмін-панель →</a></header>
+<nav><button class="on" data-t="cat">Каталог</button><button data-t="my">Мої угоди</button><button data-t="reg">Реєстрація клієнта</button></nav>
+<main>
+<section id="cat">
+ <div class="row"><label>Клас<select id="ftype"><option value="">Усі</option><option value="economy">Економ</option><option value="suv">Позашляховик</option><option value="minivan">Мінівен</option><option value="premium">Преміум</option></select></label>
+ <label>Клієнт<select id="client"></select></label></div>
+ <div id="msg"></div><div id="cars" class="grid"></div>
+ <div id="order" class="card hide" style="margin-top:18px"><h2 id="otitle"></h2>
+  <div class="row"><label>Дата видачі<input type="date" id="d1"></label><label>Дата повернення<input type="date" id="d2"></label>
+  <button class="btn sec" onclick="quote()">Розрахувати</button><button class="btn" id="rentbtn" onclick="rent()" disabled>Оформити прокат</button></div>
+  <div id="quote"></div></div>
+</section>
+<section id="my" class="hide"><div class="row"><label>Клієнт<select id="client2"></select></label></div>
+ <h2>Угоди</h2><div id="rentals"></div><h2>Сповіщення</h2><div id="notes"></div></section>
+<section id="reg" class="hide"><h2>Реєстрація клієнта</h2><div class="row">
+ <label>ПІБ<input id="rn" size="30"></label><label>Адреса<input id="ra" size="30"></label><label>Телефон<input id="rp"></label>
+ <button class="btn" onclick="register()">Зареєструвати</button></div><div id="rmsg"></div></section>
+</main>
+<script>
+const $=s=>document.querySelector(s);let cur=null;
+const TN={economy:'Економ',suv:'Позашляховик',minivan:'Мінівен',premium:'Преміум'},SN={available:'Вільний',rented:'У прокаті',maintenance:'На ТО'};
+async function api(u,o){const r=await fetch(u,o);const j=r.status==204?null:await r.json();if(!r.ok)throw new Error(j.detail||'Помилка');return j}
+const post=(u,b)=>api(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)});
+const show=(id,t,ok)=>{$(id).innerHTML=`<div class="msg ${ok?'okm':'err'}">${t}</div>`};
+document.querySelectorAll('nav button').forEach(b=>b.onclick=()=>{document.querySelectorAll('nav button').forEach(x=>x.classList.remove('on'));b.classList.add('on');
+ ['cat','my','reg'].forEach(i=>$('#'+i).classList.toggle('hide',i!==b.dataset.t));if(b.dataset.t=='my')loadMy()});
+async function loadClients(){const cs=await api('/api/clients');const o=cs.map(c=>`<option value="${c.id}">${c.full_name}</option>`).join('');$('#client').innerHTML=o;$('#client2').innerHTML=o}
+async function loadCars(){const t=$('#ftype').value;const cs=await api('/api/vehicles'+(t?'?vtype='+t:''));
+ $('#cars').innerHTML=cs.map(v=>`<div class="card"><h3>${v.brand} ${v.model}</h3><div class="mut">${TN[v.vtype]} · ${v.year} р.</div>
+ <div class="price">${v.price_per_day.toFixed(0)} грн/доба</div><div class="mut">Застава: ${v.deposit.toFixed(0)} грн</div>
+ <p><span class="badge ${v.status}">${SN[v.status]}</span></p>
+ <button class="btn" ${v.status!='available'?'disabled':''} onclick='pick(${JSON.stringify(v)})'>Орендувати</button></div>`).join('')}
+function pick(v){cur=v;$('#order').classList.remove('hide');$('#otitle').textContent=`Оформлення: ${v.brand} ${v.model}`;
+ const d=new Date(),e=new Date(Date.now()+3*864e5);$('#d1').value=d.toISOString().slice(0,10);$('#d2').value=e.toISOString().slice(0,10);$('#quote').innerHTML='';$('#rentbtn').disabled=true;$('#order').scrollIntoView({behavior:'smooth'})}
+async function quote(){try{const q=await post('/api/rentals/quote',{vehicle_id:cur.id,issue_date:$('#d1').value,expected_return:$('#d2').value,client_id:+$('#client').value});
+ $('#quote').innerHTML=`<div class="box"><b>${q.days} діб — ${q.total.toFixed(2)} грн</b><br>${q.breakdown.join('<br>')}<br>Застава (повертається після здачі авто): <b>${q.deposit.toFixed(0)} грн</b></div>`;$('#rentbtn').disabled=false}catch(e){$('#quote').innerHTML=`<div class="msg err">${e.message}</div>`}}
+async function rent(){try{await post('/api/rentals',{client_id:+$('#client').value,vehicle_id:cur.id,issue_date:$('#d1').value,expected_return:$('#d2').value});
+ show('#msg','Угоду оформлено! Деталі — у розділі «Мої угоди».',1);$('#order').classList.add('hide');loadCars()}catch(e){show('#msg',e.message)}}
+async function loadMy(){const id=$('#client2').value;if(!id)return;const rs=await api('/api/rentals?client_id='+id);
+ $('#rentals').innerHTML='<table><tr><th>№</th><th>Авто</th><th>Видача</th><th>Повернення</th><th>Ціна</th><th>Штраф</th><th>Статус</th></tr>'+rs.map(r=>`<tr><td>${r.id}</td><td>${r.car}</td><td>${r.issue_date}</td><td>${r.actual_return||r.expected_return}</td><td>${r.rent_price.toFixed(0)}</td><td>${(r.fine||0).toFixed(0)}</td><td><span class="badge ${r.status}">${r.status=='active'?'Активна':'Закрита'}</span></td></tr>`).join('')+'</table>';
+ const ns=await api('/api/notifications/'+id);$('#notes').innerHTML=ns.map(n=>`<div class="box"><span class="mut">${n.created_at.replace('T',' ')}</span><br>${n.message}</div>`).join('')||'<div class="mut">Немає сповіщень</div>'}
+$('#client2').onchange=loadMy;$('#ftype').onchange=loadCars;
+async function register(){try{const c=await post('/api/clients',{full_name:$('#rn').value,address:$('#ra').value,phone:$('#rp').value});show('#rmsg','Клієнта зареєстровано, №'+c.id,1);loadClients()}catch(e){show('#rmsg','Перевірте поля форми')}}
+loadClients();loadCars();
+</script></body></html>
